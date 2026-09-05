@@ -15,11 +15,14 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
@@ -51,22 +54,43 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             DiaryAppTheme {
-                DiaryAppScreen()
+                MainApp()
             }
         }
     }
 }
 
+@Composable
+fun MainApp() {
+    var selectedDiaryForDetail by remember { mutableStateOf<DiaryItem?>(null) }
+
+    if (selectedDiaryForDetail != null) {
+        DiaryDetailScreen(
+            diary = selectedDiaryForDetail!!,
+            onBack = { selectedDiaryForDetail = null },
+            onDiaryUpdated = { updatedDiary ->
+                selectedDiaryForDetail = updatedDiary
+            }
+        )
+    } else {
+        DiaryListScreen(
+            onDiaryClick = { diary ->
+                selectedDiaryForDetail = diary
+            }
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DiaryAppScreen() {
+fun DiaryListScreen(onDiaryClick: (DiaryItem) -> Unit) {
     val context = LocalContext.current
     val dbHelper = remember { SQLiteHelper(context) }
 
     var diaryList by remember { mutableStateOf(listOf<DiaryItem>()) }
     val selectedIds = remember { mutableStateListOf<Int>() }
 
-    var isSearchVisible by remember { mutableStateOf(false) } // Trạng thái ẩn/hiện tìm kiếm
+    var isSearchVisible by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
     var showDialog by remember { mutableStateOf(false) }
@@ -136,10 +160,9 @@ fun DiaryAppScreen() {
                             Icon(Icons.Default.Delete, contentDescription = "Xóa", tint = Color.White)
                         }
                     } else {
-                        // Nút bật/tắt ô tìm kiếm
                         IconButton(onClick = {
                             isSearchVisible = !isSearchVisible
-                            if (!isSearchVisible) searchQuery = "" // Reset tìm kiếm khi ẩn
+                            if (!isSearchVisible) searchQuery = ""
                         }) {
                             Icon(
                                 imageVector = Icons.Default.Search,
@@ -170,7 +193,6 @@ fun DiaryAppScreen() {
                 .padding(innerPadding)
                 .fillMaxSize()
         ) {
-            // Thanh Tìm kiếm với hiệu ứng xuất hiện / biến mất mượt mà
             AnimatedVisibility(
                 visible = isSearchVisible,
                 enter = expandVertically(),
@@ -202,7 +224,6 @@ fun DiaryAppScreen() {
                 )
             }
 
-            // Danh sách nhật ký
             Box(modifier = Modifier.weight(1f)) {
                 if (diaryList.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -226,12 +247,15 @@ fun DiaryAppScreen() {
                                         if (selectedIds.contains(diary.id)) selectedIds.remove(diary.id)
                                         else selectedIds.add(diary.id)
                                     } else {
-                                        editingDiary = diary
-                                        showDialog = true
+                                        onDiaryClick(diary)
                                     }
                                 },
                                 onCardLongClick = {
                                     if (!selectedIds.contains(diary.id)) selectedIds.add(diary.id)
+                                },
+                                onEditClick = {
+                                    editingDiary = diary
+                                    showDialog = true
                                 },
                                 onShareClick = {
                                     shareDiary(context, diary)
@@ -300,6 +324,116 @@ fun DiaryAppScreen() {
     }
 }
 
+// Màn hình chi tiết nhật ký (Có nút Sửa + Chia sẻ)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DiaryDetailScreen(
+    diary: DiaryItem,
+    onBack: () -> Unit,
+    onDiaryUpdated: (DiaryItem) -> Unit
+) {
+    val context = LocalContext.current
+    val dbHelper = remember { SQLiteHelper(context) }
+    var showEditDialog by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "Chi tiết nhật ký",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Quay lại",
+                            tint = Color.White
+                        )
+                    }
+                },
+                actions = {
+                    // Nút Chỉnh sửa
+                    IconButton(onClick = { showEditDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Sửa",
+                            tint = Color.White
+                        )
+                    }
+                    // Nút Chia sẻ
+                    IconButton(onClick = { shareDiary(context, diary) }) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Chia sẻ",
+                            tint = Color.White
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF00897B))
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Text(
+                text = diary.title,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF212121)
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Đã lưu vào: ${diary.dateTime}",
+                fontSize = 14.sp,
+                color = Color.Gray
+            )
+
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 16.dp),
+                color = Color.LightGray
+            )
+
+            Text(
+                text = if (diary.content.isBlank()) "(Không có nội dung)" else diary.content,
+                fontSize = 18.sp,
+                color = Color(0xFF333333),
+                lineHeight = 26.sp
+            )
+        }
+
+        // Hộp thoại Sửa trực tiếp từ màn hình chi tiết
+        if (showEditDialog) {
+            DiaryDialog(
+                diary = diary,
+                onDismiss = { showEditDialog = false },
+                onSave = { title, content ->
+                    val currentTime = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
+                    dbHelper.updateDiary(diary.id, title, content, currentTime)
+
+                    // Cập nhật lại giao diện chi tiết lập tức
+                    val updatedItem = DiaryItem(diary.id, title, content, currentTime)
+                    onDiaryUpdated(updatedItem)
+
+                    showEditDialog = false
+                    Toast.makeText(context, "Cập nhật thành công!", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DiaryCard(
@@ -307,6 +441,7 @@ fun DiaryCard(
     isSelected: Boolean,
     onCardClick: () -> Unit,
     onCardLongClick: () -> Unit,
+    onEditClick: () -> Unit,
     onShareClick: () -> Unit
 ) {
     Card(
@@ -318,7 +453,7 @@ fun DiaryCard(
                 onLongClick = onCardLongClick
             ),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) Color(0xFFE0F2F1) else Color.White
+            containerColor = if (isSelected) Color(0xFF80CBC4) else Color.White
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
@@ -356,13 +491,24 @@ fun DiaryCard(
                 )
             }
 
-            IconButton(onClick = onShareClick) {
-                Icon(
-                    imageVector = Icons.Default.Share,
-                    contentDescription = "Chia sẻ",
-                    tint = Color(0xFF00897B),
-                    modifier = Modifier.size(28.dp)
-                )
+            Row {
+                IconButton(onClick = onEditClick) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Chỉnh sửa",
+                        tint = Color(0xFF00897B),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                IconButton(onClick = onShareClick) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Chia sẻ",
+                        tint = Color(0xFF00897B),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
         }
     }
