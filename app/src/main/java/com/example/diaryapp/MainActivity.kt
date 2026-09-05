@@ -7,6 +7,9 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -15,7 +18,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -33,7 +38,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Data Class mô tả thông tin Nhật ký
 data class DiaryItem(
     val id: Int,
     val title: String,
@@ -62,30 +66,36 @@ fun DiaryAppScreen() {
     var diaryList by remember { mutableStateOf(listOf<DiaryItem>()) }
     val selectedIds = remember { mutableStateListOf<Int>() }
 
+    var isSearchVisible by remember { mutableStateOf(false) } // Trạng thái ẩn/hiện tìm kiếm
+    var searchQuery by remember { mutableStateOf("") }
+
     var showDialog by remember { mutableStateOf(false) }
-    var showDeleteDialog by remember { mutableStateOf(false) } // Biến quản lý hộp thoại xác nhận xóa
+    var showDeleteDialog by remember { mutableStateOf(false) }
     var editingDiary by remember { mutableStateOf<DiaryItem?>(null) }
 
-    // Hàm load lại dữ liệu từ SQLite Database
     fun loadDiaries() {
-        val list = mutableListOf<DiaryItem>()
-        val db = dbHelper.readableDatabase
-        val cursor = db.rawQuery("SELECT * FROM diaries ORDER BY id DESC", null)
-        if (cursor.moveToFirst()) {
-            do {
-                val id = cursor.getInt(cursor.getColumnIndexOrThrow("id"))
-                val title = cursor.getString(cursor.getColumnIndexOrThrow("title"))
-                val content = cursor.getString(cursor.getColumnIndexOrThrow("content"))
-                val dateTime = cursor.getString(cursor.getColumnIndexOrThrow("date_time"))
-                list.add(DiaryItem(id, title, content, dateTime))
-            } while (cursor.moveToNext())
+        diaryList = if (searchQuery.isBlank()) {
+            val list = mutableListOf<DiaryItem>()
+            val db = dbHelper.readableDatabase
+            val cursor = db.rawQuery("SELECT * FROM diaries ORDER BY id DESC", null)
+            if (cursor.moveToFirst()) {
+                do {
+                    val id = cursor.getInt(cursor.getColumnIndexOrThrow("id"))
+                    val title = cursor.getString(cursor.getColumnIndexOrThrow("title"))
+                    val content = cursor.getString(cursor.getColumnIndexOrThrow("content"))
+                    val dateTime = cursor.getString(cursor.getColumnIndexOrThrow("date_time"))
+                    list.add(DiaryItem(id, title, content, dateTime))
+                } while (cursor.moveToNext())
+            }
+            cursor.close()
+            db.close()
+            list
+        } else {
+            dbHelper.searchDiaries(searchQuery)
         }
-        cursor.close()
-        db.close()
-        diaryList = list
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(searchQuery) {
         loadDiaries()
     }
 
@@ -109,7 +119,6 @@ fun DiaryAppScreen() {
                         )
                     }
                 },
-                // Nút mũi tên Hủy chọn (Cancel Selection)
                 navigationIcon = {
                     if (selectedIds.isNotEmpty()) {
                         IconButton(onClick = { selectedIds.clear() }) {
@@ -123,11 +132,18 @@ fun DiaryAppScreen() {
                 },
                 actions = {
                     if (selectedIds.isNotEmpty()) {
-                        // Nút Xóa các mục đã chọn - Mở dialog xác nhận
                         IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Xóa", tint = Color.White)
+                        }
+                    } else {
+                        // Nút bật/tắt ô tìm kiếm
+                        IconButton(onClick = {
+                            isSearchVisible = !isSearchVisible
+                            if (!isSearchVisible) searchQuery = "" // Reset tìm kiếm khi ẩn
+                        }) {
                             Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "Xóa",
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Tìm kiếm",
                                 tint = Color.White
                             )
                         }
@@ -149,49 +165,90 @@ fun DiaryAppScreen() {
             }
         }
     ) { innerPadding ->
-        Box(modifier = Modifier.padding(innerPadding)) {
-            if (diaryList.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Chưa có nhật ký nào", color = Color.Gray, fontSize = 18.sp)
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 8.dp)
-                ) {
-                    items(diaryList, key = { it.id }) { diary ->
-                        DiaryCard(
-                            diary = diary,
-                            isSelected = selectedIds.contains(diary.id),
-                            onCardClick = {
-                                if (selectedIds.isNotEmpty()) {
-                                    if (selectedIds.contains(diary.id)) selectedIds.remove(diary.id)
-                                    else selectedIds.add(diary.id)
-                                } else {
-                                    editingDiary = diary
-                                    showDialog = true
-                                }
-                            },
-                            onCardLongClick = {
-                                if (!selectedIds.contains(diary.id)) selectedIds.add(diary.id)
-                            },
-                            onShareClick = {
-                                shareDiary(context, diary)
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
+        ) {
+            // Thanh Tìm kiếm với hiệu ứng xuất hiện / biến mất mượt mà
+            AnimatedVisibility(
+                visible = isSearchVisible,
+                enter = expandVertically(),
+                exit = shrinkVertically()
+            ) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    placeholder = { Text("Tìm kiếm nhật ký...", fontSize = 16.sp) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = "Tìm kiếm", tint = Color.Gray)
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            if (searchQuery.isNotEmpty()) {
+                                searchQuery = ""
+                            } else {
+                                isSearchVisible = false
                             }
+                        }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Đóng", tint = Color.Gray)
+                        }
+                    },
+                    singleLine = true,
+                    textStyle = TextStyle(fontSize = 16.sp)
+                )
+            }
+
+            // Danh sách nhật ký
+            Box(modifier = Modifier.weight(1f)) {
+                if (diaryList.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = if (searchQuery.isEmpty()) "Chưa có nhật ký nào" else "Không tìm thấy kết quả phù hợp",
+                            color = Color.Gray,
+                            fontSize = 18.sp
                         )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) {
+                        items(diaryList, key = { it.id }) { diary ->
+                            DiaryCard(
+                                diary = diary,
+                                isSelected = selectedIds.contains(diary.id),
+                                onCardClick = {
+                                    if (selectedIds.isNotEmpty()) {
+                                        if (selectedIds.contains(diary.id)) selectedIds.remove(diary.id)
+                                        else selectedIds.add(diary.id)
+                                    } else {
+                                        editingDiary = diary
+                                        showDialog = true
+                                    }
+                                },
+                                onCardLongClick = {
+                                    if (!selectedIds.contains(diary.id)) selectedIds.add(diary.id)
+                                },
+                                onShareClick = {
+                                    shareDiary(context, diary)
+                                }
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // Hộp thoại Thêm/Sửa Nhật ký
         if (showDialog) {
             DiaryDialog(
                 diary = editingDiary,
                 onDismiss = { showDialog = false },
                 onSave = { title, content ->
-                    val currentTime =
-                        SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
+                    val currentTime = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
                     if (editingDiary == null) {
                         dbHelper.insertDiary(title, content, currentTime)
                     } else {
@@ -203,7 +260,6 @@ fun DiaryAppScreen() {
             )
         }
 
-        // Hộp thoại Xác nhận Xóa
         if (showDeleteDialog) {
             AlertDialog(
                 onDismissRequest = { showDeleteDialog = false },
@@ -274,7 +330,6 @@ fun DiaryCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                // Tiêu đề
                 Text(
                     text = diary.title,
                     fontWeight = FontWeight.Bold,
@@ -282,7 +337,6 @@ fun DiaryCard(
                     color = Color(0xFF212121)
                 )
 
-                // Nội dung chi tiết
                 if (diary.content.isNotBlank()) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
@@ -294,7 +348,6 @@ fun DiaryCard(
                     )
                 }
 
-                // Thời gian
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = diary.dateTime,
@@ -303,7 +356,6 @@ fun DiaryCard(
                 )
             }
 
-            // Nút Chia sẻ
             IconButton(onClick = onShareClick) {
                 Icon(
                     imageVector = Icons.Default.Share,
@@ -374,7 +426,6 @@ fun DiaryDialog(
     )
 }
 
-// Chức năng chia sẻ sang MXH
 fun shareDiary(context: Context, diary: DiaryItem) {
     val sendIntent = Intent().apply {
         action = Intent.ACTION_SEND
