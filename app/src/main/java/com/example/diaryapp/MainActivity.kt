@@ -406,7 +406,7 @@ fun DiaryDetailScreen(
             )
 
             Text(
-                text = if (diary.content.isBlank()) "(Không có nội dung)" else diary.content,
+                text = diary.content.ifBlank { "(Không có nội dung)" },
                 fontSize = 18.sp,
                 color = Color(0xFF333333),
                 lineHeight = 26.sp
